@@ -58,7 +58,7 @@ ACCOUNT_SIZE: float = 5000.0  # Default simulated account size in USDT
 # AI Layer
 # ---------------------------------------------------------------------------
 OLLAMA_URL: str = "http://localhost:11434/api/generate"
-OLLAMA_MODEL: str = "llama3.1:8b"
+OLLAMA_MODEL: str = "tinyllama"  # llama3.1:8b requires 4.8 GiB; tinyllama fits in <1 GiB
 NVIDIA_API_URL: str = "https://integrate.api.nvidia.com/v1"
 
 # ---------------------------------------------------------------------------

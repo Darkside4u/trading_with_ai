@@ -8,3 +8,4 @@ tabulate>=0.9
 python-dotenv>=1.0
 requests>=2.31
 pydantic>=2.0
+flask

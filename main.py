@@ -21,6 +21,8 @@ import sys
 import time
 from typing import Dict, Optional
 
+import pandas as pd
+
 from dotenv import load_dotenv
 
 # ---------------------------------------------------------------------------
@@ -29,6 +31,7 @@ from dotenv import load_dotenv
 # ---------------------------------------------------------------------------
 load_dotenv()
 
+from ai_layer.cloud_llm import CloudLLM
 from ai_layer.local_llm import LocalLLM
 from config.settings import ACCOUNT_SIZE, DEFAULT_TIMEFRAME
 from config.symbols import TRADING_SYMBOLS
@@ -48,6 +51,8 @@ from strategies.regime import (
     RegimeClassifier,
 )
 from strategies.trend import TrendStrategy
+from dashboard.app import start_dashboard
+from dashboard.state import DashboardState
 
 # ---------------------------------------------------------------------------
 # Logging setup
@@ -72,6 +77,7 @@ def _handle_shutdown(signum, frame) -> None:  # noqa: ANN001
     global _running
     logger.warning("Shutdown signal received (%s) — stopping after current cycle", signum)
     _running = False
+    DashboardState.get().set_engine_running(False)
 
 
 signal.signal(signal.SIGTERM, _handle_shutdown)
@@ -139,7 +145,11 @@ def main() -> None:
     portfolio = Portfolio(account_size)
     allocator = DynamicAllocator(TRADING_SYMBOLS)
     local_llm = LocalLLM()
+    cloud_llm = CloudLLM()
     db = DatabaseManager()
+
+    # Weekly review tracking
+    _last_weekly_review: Dict[str, float] = {"timestamp": 0.0}
 
     # Register strategies in database
     for name, strat in [
@@ -157,6 +167,15 @@ def main() -> None:
 
     logger.info("Trading engine initialised — watching %s", TRADING_SYMBOLS)
 
+    # --- Start dashboard ---
+    dash = DashboardState.get()
+    dash.set_account_size(account_size)
+    dash.set_engine_running(True)
+    start_dashboard(port=5050)
+    logger.info("Dashboard available at http://localhost:5050")
+
+    _WEEK_SECONDS = 7 * 24 * 3600
+
     # --- Main loop ---
     while _running:
         try:
@@ -172,6 +191,16 @@ def main() -> None:
                 db=db,
                 account_size=account_size,
             )
+            # Update dashboard after each cycle
+            dash.update_positions(portfolio._positions)
+            dash.update_circuit_breaker(circuit_breaker.is_trading_allowed)
+            dash.mark_cycle_complete()
+
+            # Weekly cloud-LLM portfolio review
+            now_ts = time.time()
+            if now_ts - _last_weekly_review.get("timestamp", 0.0) >= _WEEK_SECONDS:
+                _last_weekly_review["timestamp"] = now_ts
+                _run_weekly_review(cloud_llm, portfolio, account_size)
         except Exception as exc:  # noqa: BLE001
             logger.error("Unhandled error in trading cycle: %s", exc, exc_info=True)
 
@@ -180,6 +209,35 @@ def main() -> None:
         time.sleep(sleep_secs)
 
     logger.info("Trading engine stopped cleanly.")
+
+
+def _run_weekly_review(
+    cloud_llm: CloudLLM,
+    portfolio: Portfolio,
+    account_size: float,
+) -> None:
+    """Call cloud LLM for weekly strategic review and log suggestions."""
+    logger.info("Starting weekly cloud LLM portfolio review…")
+    try:
+        open_syms = portfolio.open_symbols
+        exposure = portfolio.total_exposure
+        perf_summary = {
+            "open_positions": open_syms,
+            "total_exposure": round(exposure, 4),
+            "account_size": account_size,
+        }
+        # Use neutral baselines — real Sharpe/DD tracking can be added via backtester
+        suggestions = cloud_llm.weekly_review(
+            performance_summary=perf_summary,
+            current_sharpe=1.0,
+            current_drawdown=-5.0,
+        )
+        if suggestions:
+            logger.info("Cloud LLM weekly suggestions: %s", suggestions)
+        else:
+            logger.info("Cloud LLM weekly review: no actionable suggestions passed the gate")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Weekly cloud LLM review failed: %s", exc)
 
 
 def _run_cycle(
@@ -217,11 +275,17 @@ def _run_cycle(
         for sym in candles
     }
 
+    # 4. Compute risk-parity weights from the allocator
+    alloc_weights = allocator.risk_parity_weights(returns_map)
+    logger.info("Allocation weights: %s", {k: round(v, 3) for k, v in alloc_weights.items()})
+    DashboardState.get().update_weights(alloc_weights)
+
     for symbol, df in candles.items():
         _process_symbol(
             symbol=symbol,
             df=df,
             returns_map=returns_map,
+            alloc_weight=alloc_weights.get(symbol, 1.0 / len(candles)),
             regime_classifier=regime_classifier,
             risk_manager=risk_manager,
             circuit_breaker=circuit_breaker,
@@ -236,6 +300,7 @@ def _process_symbol(
     symbol: str,
     df,
     returns_map: dict,
+    alloc_weight: float,
     regime_classifier: RegimeClassifier,
     risk_manager: RiskManager,
     circuit_breaker: CircuitBreaker,
@@ -249,6 +314,7 @@ def _process_symbol(
     # a. Detect regime
     regime = regime_classifier.classify(df)
     logger.info("[%s] Regime: %s", symbol, regime)
+    DashboardState.get().update_regime(symbol, regime)
 
     # b. Select strategy
     strategy = _select_strategy(regime)
@@ -329,7 +395,12 @@ def _process_symbol(
         logger.info("[%s] Portfolio constraint blocks new position", symbol)
         return
 
-    adjusted_qty = sizing["quantity"] * weight_mult
+    # Apply both portfolio correlation weight AND allocator risk-parity weight
+    adjusted_qty = sizing["quantity"] * weight_mult * alloc_weight * len(TRADING_SYMBOLS)
+    logger.info(
+        "[%s] qty adjustment: base=%.6f  corr_mult=%.2f  alloc_w=%.3f  final=%.6f",
+        symbol, sizing["quantity"], weight_mult, alloc_weight, adjusted_qty,
+    )
 
     # h. Set leverage on exchange
     try:

@@ -20,6 +20,20 @@ _cache: Dict[Tuple[str, str], Tuple[float, pd.DataFrame]] = {}
 CACHE_TTL_SECONDS: float = 60.0  # re-fetch after 60 s
 
 
+def _make_public_exchange():
+    """Create an unauthenticated ccxt binanceusdm instance for public data."""
+    try:
+        import ccxt  # type: ignore[import-untyped]
+    except ImportError as exc:
+        raise ImportError("ccxt is required: pip install ccxt") from exc
+    return ccxt.binanceusdm({
+        "options": {
+            "defaultType": "future",
+            "fetchCurrencies": False,
+        },
+    })
+
+
 class DataLoader:
     """Fetches and caches OHLCV data from Binance Futures via ccxt."""
 
@@ -29,8 +43,12 @@ class DataLoader:
         ----------
         exchange:
             An initialised ccxt exchange instance (sandbox mode already set).
+            A separate unauthenticated exchange is used internally for public
+            OHLCV data to avoid API-key validation errors on market endpoints.
         """
         self.exchange = exchange
+        # Public exchange — no API keys needed for OHLCV
+        self._public_exchange = _make_public_exchange()
 
     # ------------------------------------------------------------------
     # Public API
@@ -70,7 +88,7 @@ class DataLoader:
                     return df
 
         try:
-            raw = self.exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
+            raw = self._public_exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
         except Exception as exc:  # noqa: BLE001
             logger.error("Failed to fetch OHLCV for %s %s: %s", symbol, timeframe, exc)
             return None

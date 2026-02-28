@@ -1,0 +1,74 @@
+// ═══════════════════════════════════════════════════════════════════════════
+// VWAP Mean-Reversion Strategy — TradingView Backtest
+// Converted from: strategies/mean_reversion.py
+//
+// Long entry (all must be true):
+//   1. (Price − VWAP) / VWAP < −0.8%    — price well below VWAP
+//   2. RSI(14) < 30                      — oversold
+//   3. Volume declining (selling exhaustion)
+//
+// Short entry: mirror opposite.
+// Stop  : 1.0 × ATR(14)
+// Target: price returns to VWAP
+// ═══════════════════════════════════════════════════════════════════════════
+
+//@version=5
+strategy("VWAP Mean Reversion", overlay=true, default_qty_type=strategy.percent_of_equity,
+     default_qty_value=10, initial_capital=5000, commission_type=strategy.commission.percent,
+     commission_value=0.04, slippage=1, pyramiding=0)
+
+// ── Inputs ──────────────────────────────────────────────────────────────────
+rsiLen         = input.int(14,    "RSI Period",            minval=5)
+rsiOversold    = input.float(30,  "RSI Oversold",          minval=10, maxval=50)
+rsiOverbought  = input.float(70,  "RSI Overbought",        minval=50, maxval=95)
+atrLen         = input.int(14,    "ATR Period",            minval=5)
+devThreshold   = input.float(0.8, "VWAP Deviation % (abs)",minval=0.1, step=0.1)
+
+// ── Indicators ──────────────────────────────────────────────────────────────
+// VWAP — TradingView built-in (session-anchored by default)
+vwapVal = ta.vwap(hlc3)
+rsiVal  = ta.rsi(close, rsiLen)
+atrVal  = ta.atr(atrLen)
+
+// VWAP deviation (%)
+deviation = (close - vwapVal) / vwapVal * 100.0
+
+// Volume declining: 3-bar rolling average vs 3 bars ago
+volMA3_now  = ta.sma(volume, 3)
+volMA3_prev = ta.sma(volume, 3)[3]
+volDeclining = volMA3_now < volMA3_prev
+
+// ── Conditions ──────────────────────────────────────────────────────────────
+longCond  = deviation < -devThreshold and rsiVal < rsiOversold  and volDeclining
+shortCond = deviation >  devThreshold and rsiVal > rsiOverbought and volDeclining
+
+// ── Entries ─────────────────────────────────────────────────────────────────
+if longCond and strategy.position_size == 0
+    stopLoss   = close - atrVal
+    takeProfit = vwapVal           // target = return to VWAP
+    strategy.entry("Long", strategy.long)
+    strategy.exit("Long TP/SL", "Long", stop=stopLoss, limit=takeProfit)
+
+if shortCond and strategy.position_size == 0
+    stopLoss   = close + atrVal
+    takeProfit = vwapVal           // target = return to VWAP
+    strategy.entry("Short", strategy.short)
+    strategy.exit("Short TP/SL", "Short", stop=stopLoss, limit=takeProfit)
+
+// ── Plots ───────────────────────────────────────────────────────────────────
+plot(vwapVal, "VWAP", color=color.new(color.purple, 0), linewidth=2)
+
+// Deviation zones
+devUpper = vwapVal * (1 + devThreshold / 100)
+devLower = vwapVal * (1 - devThreshold / 100)
+p1 = plot(devUpper, "Upper Dev", color=color.new(color.red, 60))
+p2 = plot(devLower, "Lower Dev", color=color.new(color.green, 60))
+fill(p1, p2, color=color.new(color.purple, 92), title="VWAP Zone")
+
+// RSI extreme background
+bgcolor(rsiVal < rsiOversold  ? color.new(color.green, 90) : na, title="Oversold")
+bgcolor(rsiVal > rsiOverbought ? color.new(color.red, 90)   : na, title="Overbought")
+
+// Signal markers
+plotshape(longCond  and strategy.position_size == 0, "Long",  shape.triangleup,   location.belowbar, color.green, size=size.small)
+plotshape(shortCond and strategy.position_size == 0, "Short", shape.triangledown, location.abovebar, color.red,   size=size.small)

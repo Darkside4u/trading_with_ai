@@ -21,8 +21,8 @@ from config.settings import NVIDIA_API_URL
 
 logger = logging.getLogger(__name__)
 
-REQUEST_TIMEOUT: int = 120  # seconds — cloud call is slower
-CLOUD_MODEL: str = "meta/llama-3.1-405b-instruct"  # NVIDIA 400B model
+REQUEST_TIMEOUT: int = 180  # seconds — 253B reasoning model needs more time
+CLOUD_MODEL: str = "nvidia/llama-3.1-nemotron-ultra-253b-v1"  # NVIDIA Nemotron Ultra 253B reasoning model
 
 
 class CloudLLM:
@@ -108,7 +108,7 @@ class CloudLLM:
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.2,
-            "max_tokens": 1024,
+            "max_tokens": 2048,  # extra tokens for chain-of-thought reasoning
         }
         try:
             resp = requests.post(
@@ -127,16 +127,26 @@ class CloudLLM:
 
     @staticmethod
     def _parse_response(raw: str) -> Dict[str, Any]:
-        """Extract JSON suggestions from LLM response."""
+        """Extract JSON suggestions from LLM response.
+
+        Nemotron Ultra (reasoning model) may wrap its chain-of-thought in
+        ``<think>...</think>`` tags before emitting the final JSON answer.
+        We strip those tags so only the answer portion is parsed.
+        """
         if not raw:
             return {}
-        start = raw.find("{")
-        end = raw.rfind("}") + 1
+
+        # Strip <think>...</think> reasoning block emitted by Nemotron Ultra
+        import re
+        cleaned = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+
+        start = cleaned.find("{")
+        end = cleaned.rfind("}") + 1
         if start == -1 or end == 0:
             logger.warning("No JSON in cloud LLM response")
             return {}
         try:
-            return json.loads(raw[start:end])
+            return json.loads(cleaned[start:end])
         except json.JSONDecodeError as exc:
             logger.warning("Cloud LLM JSON parse error: %s", exc)
             return {}

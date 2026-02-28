@@ -22,7 +22,7 @@ from config.settings import OLLAMA_MODEL, OLLAMA_URL
 logger = logging.getLogger(__name__)
 
 DEFAULT_CONFIDENCE: float = 0.5
-REQUEST_TIMEOUT: int = 10  # seconds — keep short to avoid blocking the trading loop
+REQUEST_TIMEOUT: int = 60  # seconds — raised from 10 to handle cold-start model load
 
 
 class LocalLLM:

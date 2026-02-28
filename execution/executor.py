@@ -1,7 +1,8 @@
 """
-Order Execution Layer — Binance Futures TESTNET via ccxt.
+Order Execution Layer — Binance Futures Demo Trading via ccxt.
 
-SAFETY: exchange.set_sandbox_mode(True) is called in __init__.
+SAFETY: options['demo'] = True is set in __init__ (Binance Demo Trading).
+        The old testnet sandbox mode was deprecated in 2024.
         All API keys must be provided via environment variables.
 
 Supports:
@@ -41,12 +42,14 @@ class Executor:
             {
                 "apiKey": api_key,
                 "secret": api_secret,
-                "options": {"defaultType": "future"},
+                "options": {
+                    "defaultType": "future",
+                    "demo": True,          # Binance Demo Trading (replaces deprecated testnet)
+                    "fetchCurrencies": False,  # Skip authenticated currencies endpoint on load_markets
+                },
             }
         )
-        # MANDATORY: testnet only
-        self.exchange.set_sandbox_mode(True)
-        logger.info("Executor initialised in SANDBOX (testnet) mode")
+        logger.info("Executor initialised in DEMO (paper-trading) mode")
 
     # ------------------------------------------------------------------
     # Account info
