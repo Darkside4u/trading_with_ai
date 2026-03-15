@@ -1,0 +1,85 @@
+// ═══════════════════════════════════════════════════════════════════════════
+// EMA Trend Momentum Strategy — TradingView Backtest
+// Converted from: strategies/trend.py
+//
+// Entry Logic (Long):
+//   1. EMA(20) > EMA(50)              — bullish crossover
+//   2. Price > EMA(200)               — above long-term trend
+//   3. ADX(14) > 25                   — strong trend confirmed
+//   4. Slope(EMA20, 5 bars) > 0       — momentum accelerating
+//   5. Volume > 1.2 × SMA(Vol, 20)   — volume confirmation
+//
+// Short: mirror opposite.
+// Stop-loss : Entry ∓ 1.2 × ATR(14)
+// Take-profit: 1.5 R (risk-reward)
+// ═══════════════════════════════════════════════════════════════════════════
+
+//@version=5
+strategy("EMA Trend Momentum", overlay=true, default_qty_type=strategy.percent_of_equity,
+     default_qty_value=10, initial_capital=5000, commission_type=strategy.commission.percent,
+     commission_value=0.04, slippage=1, pyramiding=0)
+
+// ── Inputs ──────────────────────────────────────────────────────────────────
+emaFastLen    = input.int(20,   "EMA Fast",           minval=5)
+emaSlowLen    = input.int(50,   "EMA Slow",           minval=10)
+emaFilterLen  = input.int(200,  "EMA Filter (LT)",    minval=50)
+adxLen        = input.int(14,   "ADX Period",         minval=5)
+adxThreshold  = input.float(25, "ADX Trend Threshold",minval=10)
+atrLen        = input.int(14,   "ATR Period",         minval=5)
+atrStopMult   = input.float(1.2,"ATR Stop Multiplier",minval=0.5, step=0.1)
+tpMultiple    = input.float(1.5,"Take-Profit (x R)",  minval=1.0, step=0.25)
+volMultiplier = input.float(1.2,"Volume Multiplier",   minval=1.0, step=0.1)
+slopeLen      = input.int(5,   "Slope Lookback",      minval=2)
+
+// ── Indicators ──────────────────────────────────────────────────────────────
+emaFast   = ta.ema(close, emaFastLen)
+emaSlow   = ta.ema(close, emaSlowLen)
+emaFilter = ta.ema(close, emaFilterLen)
+atrVal    = ta.atr(atrLen)
+volMA     = ta.sma(volume, 20)
+
+// ADX (built-in)
+[diplus, diminus, adxVal] = ta.dmi(adxLen, adxLen)
+
+// EMA slope (% change over N bars)
+emaSlope = (emaFast - emaFast[slopeLen]) / emaFast[slopeLen]
+
+// ── Conditions ──────────────────────────────────────────────────────────────
+longCond = emaFast > emaSlow and
+     close > emaFilter and
+     adxVal > adxThreshold and
+     emaSlope > 0 and
+     volume > volMultiplier * volMA
+
+shortCond = emaFast < emaSlow and
+     close < emaFilter and
+     adxVal > adxThreshold and
+     emaSlope < 0 and
+     volume > volMultiplier * volMA
+
+// ── Entries ─────────────────────────────────────────────────────────────────
+if longCond and strategy.position_size == 0
+    stopLoss   = close - atrStopMult * atrVal
+    risk       = close - stopLoss
+    takeProfit = close + tpMultiple * risk
+    strategy.entry("Long", strategy.long)
+    strategy.exit("Long TP/SL", "Long", stop=stopLoss, limit=takeProfit)
+
+if shortCond and strategy.position_size == 0
+    stopLoss   = close + atrStopMult * atrVal
+    risk       = stopLoss - close
+    takeProfit = close - tpMultiple * risk
+    strategy.entry("Short", strategy.short)
+    strategy.exit("Short TP/SL", "Short", stop=stopLoss, limit=takeProfit)
+
+// ── Plots ───────────────────────────────────────────────────────────────────
+plot(emaFast,   "EMA 20",  color=color.new(color.yellow, 0), linewidth=1)
+plot(emaSlow,   "EMA 50",  color=color.new(color.orange, 0), linewidth=1)
+plot(emaFilter, "EMA 200", color=color.new(color.gray, 40),  linewidth=1)
+
+// Highlight background when ADX confirms trend
+bgcolor(adxVal > adxThreshold ? color.new(color.green, 92) : na, title="Trend Zone")
+
+// Signal markers
+plotshape(longCond  and strategy.position_size == 0, "Long",  shape.triangleup,   location.belowbar, color.green, size=size.small)
+plotshape(shortCond and strategy.position_size == 0, "Short", shape.triangledown, location.abovebar, color.red,   size=size.small)

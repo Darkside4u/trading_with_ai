@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>AI Trading Engine — Dashboard</title>
+<style>
+  :root {
+    --bg: #0d1117; --bg2: #161b22; --bg3: #21262d;
+    --border: #30363d; --text: #e6edf3; --muted: #8b949e;
+    --green: #3fb950; --red: #f85149; --blue: #58a6ff;
+    --yellow: #e3b341; --purple: #bc8cff; --orange: #ffa657;
+    --radius: 8px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; font-size: 14px; }
+
+  /* Layout */
+  .page { max-width: 1400px; margin: 0 auto; padding: 16px; }
+  .header { display: flex; align-items: center; justify-content: space-between; padding: 12px 0 20px; border-bottom: 1px solid var(--border); margin-bottom: 20px; }
+  .header h1 { font-size: 20px; font-weight: 600; color: var(--blue); letter-spacing: .5px; }
+  .header h1 span { color: var(--muted); font-weight: 400; font-size: 13px; margin-left: 8px; }
+
+  .status-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .badge { padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; letter-spacing: .5px; text-transform: uppercase; }
+  .badge-green { background: rgba(63,185,80,.15); color: var(--green); border: 1px solid rgba(63,185,80,.3); }
+  .badge-red   { background: rgba(248,81,73,.15);  color: var(--red);   border: 1px solid rgba(248,81,73,.3); }
+  .badge-yellow{ background: rgba(227,179,65,.15); color: var(--yellow);border: 1px solid rgba(227,179,65,.3); }
+  .badge-blue  { background: rgba(88,166,255,.12); color: var(--blue);  border: 1px solid rgba(88,166,255,.3); }
+  .badge-purple{ background: rgba(188,140,255,.12);color: var(--purple);border: 1px solid rgba(188,140,255,.3); }
+
+  #last-update { font-size: 11px; color: var(--muted); }
+  #countdown-bar { width: 80px; height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; }
+  #countdown-fill { height: 100%; background: var(--blue); transition: width linear; }
+
+  /* Grid */
+  .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 20px; }
+  .grid-2-1 { display: grid; grid-template-columns: 2fr 1fr; gap: 12px; margin-bottom: 20px; }
+  @media(max-width: 1000px) { .grid-2-1 { grid-template-columns: 1fr; } .grid-3 { grid-template-columns: 1fr; } }
+
+  /* Cards */
+  .card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+  .card-title { font-size: 11px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin-bottom: 12px; font-weight: 600; }
+
+  /* Price cards */
+  .price-card { position: relative; overflow: hidden; }
+  .price-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; }
+  .price-card.up::before { background: var(--green); }
+  .price-card.down::before { background: var(--red); }
+  .price-card.neutral::before { background: var(--muted); }
+  .price-symbol { font-size: 12px; font-weight: 700; color: var(--muted); letter-spacing: 1px; }
+  .price-main { font-size: 28px; font-weight: 700; margin: 6px 0 2px; letter-spacing: -.5px; }
+  .price-change { font-size: 13px; font-weight: 600; }
+  .price-change.up { color: var(--green); } .price-change.down { color: var(--red); }
+  .price-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-top: 10px; font-size: 11px; color: var(--muted); }
+  .price-meta span { display: flex; justify-content: space-between; }
+  .price-meta .val { color: var(--text); }
+  .regime-tag { position: absolute; top: 16px; right: 16px; }
+
+  /* Tables */
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; padding: 8px 12px; font-size: 11px; letter-spacing: .6px; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--border); font-weight: 600; }
+  td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: var(--bg3); }
+  .empty-row td { color: var(--muted); font-style: italic; text-align: center; padding: 24px; }
+
+  /* PnL colors */
+  .pos { color: var(--green); } .neg { color: var(--red); }
+  .side-long  { color: var(--green); font-weight: 700; }
+  .side-short { color: var(--red);   font-weight: 700; }
+
+  /* Price levels */
+  .level { display: flex; flex-direction: column; gap: 2px; }
+  .level-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+  .level-val { font-weight: 600; font-size: 13px; }
+  .level-val.sl { color: var(--red); } .level-val.tp { color: var(--green); } .level-val.entry { color: var(--blue); }
+
+  /* PnL bar */
+  .pnl-bar-wrap { width: 80px; }
+  .pnl-bar { height: 5px; border-radius: 3px; margin-top: 3px; }
+  .pnl-bar.pos-bar { background: var(--green); } .pnl-bar.neg-bar { background: var(--red); }
+
+  /* Allocation */
+  .alloc-item { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .alloc-label { width: 80px; font-weight: 600; font-size: 12px; }
+  .alloc-bar-wrap { flex: 1; background: var(--border); border-radius: 4px; height: 10px; overflow: hidden; }
+  .alloc-bar { height: 100%; border-radius: 4px; transition: width .5s ease; }
+  .alloc-pct { width: 40px; text-align: right; font-size: 12px; color: var(--muted); }
+
+  /* Stats strip */
+  .stats-strip { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 20px; }
+  .stat-item { display: flex; flex-direction: column; gap: 2px; }
+  .stat-label { font-size: 10px; text-transform: uppercase; letter-spacing: .7px; color: var(--muted); }
+  .stat-val { font-size: 22px; font-weight: 700; }
+
+  /* Spinner */
+  .spin { display: inline-block; width: 10px; height: 10px; border: 2px solid var(--border); border-top-color: var(--blue); border-radius: 50%; animation: spin .7s linear infinite; margin-right: 4px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Notes truncate */
+  .notes { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11px; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- HEADER -->
+  <div class="header">
+    <h1>⚡ AI Trading Engine <span id="engine-label">Dashboard</span></h1>
+    <div class="status-row">
+      <span id="engine-badge" class="badge badge-yellow">...</span>
+      <span id="cb-badge" class="badge badge-yellow">...</span>
+      <span id="last-update">Loading…</span>
+      <div id="countdown-bar"><div id="countdown-fill" style="width:100%"></div></div>
+    </div>
+  </div>
+
+  <!-- STATS STRIP -->
+  <div class="stats-strip" id="stats-strip">
+    <div class="stat-item"><div class="stat-label">Account Size</div><div class="stat-val" id="s-account">—</div></div>
+    <div class="stat-item"><div class="stat-label">Open Positions</div><div class="stat-val" id="s-open">—</div></div>
+    <div class="stat-item"><div class="stat-label">Total Trades</div><div class="stat-val" id="s-trades">—</div></div>
+    <div class="stat-item"><div class="stat-label">Last Cycle</div><div class="stat-val" style="font-size:13px;padding-top:5px" id="s-cycle">—</div></div>
+  </div>
+
+  <!-- PRICE CARDS -->
+  <div class="grid-3" id="price-grid">
+    {% for sym in symbols %}
+    <div class="card price-card neutral" id="card-{{ sym | replace('/', '-') }}">
+      <div class="regime-tag" id="regime-{{ sym | replace('/', '-') }}"></div>
+      <div class="price-symbol">{{ sym }}</div>
+      <div class="price-main" id="price-{{ sym | replace('/', '-') }}">—</div>
+      <div class="price-change" id="chg-{{ sym | replace('/', '-') }}">—</div>
+      <div class="price-meta">
+        <span>24H High <span class="val" id="h-{{ sym | replace('/', '-') }}">—</span></span>
+        <span>24H Low <span class="val" id="l-{{ sym | replace('/', '-') }}">—</span></span>
+        <span>Bid <span class="val" id="bid-{{ sym | replace('/', '-') }}">—</span></span>
+        <span>Ask <span class="val" id="ask-{{ sym | replace('/', '-') }}">—</span></span>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <!-- POSITIONS + ALLOCATION -->
+  <div class="grid-2-1">
+
+    <!-- Open Positions -->
+    <div class="card">
+      <div class="card-title">Open Positions</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Symbol</th><th>Side</th><th>Entry</th><th>Current</th>
+            <th>Stop Loss</th><th>Take Profit</th><th>Qty</th><th>PnL</th>
+          </tr></thead>
+          <tbody id="positions-body">
+            <tr class="empty-row"><td colspan="8">No open positions</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Allocation Weights -->
+    <div class="card">
+      <div class="card-title">Risk-Parity Allocation</div>
+      <div id="alloc-wrap">
+        {% for sym in symbols %}
+        <div class="alloc-item">
+          <div class="alloc-label">{{ sym.split('/')[0] }}</div>
+          <div class="alloc-bar-wrap"><div class="alloc-bar" id="abar-{{ sym | replace('/', '-') }}" style="width:33%;background:var(--blue)"></div></div>
+          <div class="alloc-pct" id="apct-{{ sym | replace('/', '-') }}">—</div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <!-- RECENT TRADES -->
+  <div class="card">
+    <div class="card-title">Recent Trades</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>#</th><th>Time</th><th>Symbol</th><th>Side</th><th>Strategy</th>
+          <th>Price</th><th>Qty</th><th>PnL</th><th>Status</th><th>Notes</th>
+        </tr></thead>
+        <tbody id="trades-body">
+          <tr class="empty-row"><td colspan="10">No trades yet</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const REFRESH_MS = 5000;
+const SYMBOLS = {{ symbols | tojson }};
+
+function id(s) { return document.getElementById(s); }
+function slug(s) { return s.replace('/', '-'); }
+function fmt(n, d=2) { return n != null ? Number(n).toLocaleString('en-US', {minimumFractionDigits:d, maximumFractionDigits:d}) : '—'; }
+function fmtUSD(n) { return n != null ? '$' + fmt(n, 2) : '—'; }
+
+// ── Countdown bar ───────────────────────────────────────────────────────────
+let countdownInterval = null;
+function startCountdown(ms) {
+  clearInterval(countdownInterval);
+  const fill = id('countdown-fill');
+  let start = Date.now();
+  fill.style.transition = 'none'; fill.style.width = '100%';
+  countdownInterval = setInterval(() => {
+    const elapsed = Date.now() - start;
+    const pct = Math.max(0, 100 - (elapsed / ms) * 100);
+    fill.style.width = pct + '%';
+    if (pct === 0) clearInterval(countdownInterval);
+  }, 100);
+}
+
+// ── Snapshot (engine state + prices) ───────────────────────────────────────
+async function fetchSnapshot() {
+  const r = await fetch('/api/snapshot'); return r.json();
+}
+async function fetchTrades() {
+  const r = await fetch('/api/trades'); return r.json();
+}
+
+function updatePrices(lp, regimes) {
+  SYMBOLS.forEach(sym => {
+    const s = slug(sym);
+    const t = lp[sym] || {};
+    const last = t.last; const chg = t.change_pct;
+    id('price-' + s).textContent = last != null ? '$' + fmt(last, 2) : '—';
+    const chgEl = id('chg-' + s);
+    if (chg != null) {
+      const up = chg >= 0;
+      chgEl.textContent = (up ? '▲ +' : '▼ ') + fmt(chg, 2) + '%';
+      chgEl.className = 'price-change ' + (up ? 'up' : 'down');
+      const card = id('card-' + s);
+      card.className = 'card price-card ' + (up ? 'up' : 'down');
+    } else { chgEl.textContent = '—'; chgEl.className = 'price-change'; }
+    id('h-' + s).textContent  = t.high_24h  != null ? '$' + fmt(t.high_24h, 2)  : '—';
+    id('l-' + s).textContent  = t.low_24h   != null ? '$' + fmt(t.low_24h, 2)   : '—';
+    id('bid-' + s).textContent = t.bid != null ? '$' + fmt(t.bid, 2) : '—';
+    id('ask-' + s).textContent = t.ask != null ? '$' + fmt(t.ask, 2) : '—';
+
+    // Regime tag
+    const reg = (regimes || {})[sym] || '';
+    const regEl = id('regime-' + s);
+    if (reg) {
+      const cls = { TREND:'badge-green', CHOP:'badge-yellow', EXPANSION:'badge-blue',
+                    UNCERTAIN:'badge-purple' }[reg] || 'badge-blue';
+      regEl.innerHTML = `<span class="badge ${cls}">${reg}</span>`;
+    } else { regEl.innerHTML = ''; }
+  });
+}
+
+function updatePositions(positions, lp) {
+  const tbody = id('positions-body');
+  const keys = Object.keys(positions);
+  id('s-open').textContent = keys.length;
+  if (!keys.length) {
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="8">No open positions</td></tr>';
+    return;
+  }
+  tbody.innerHTML = keys.map(sym => {
+    const p = positions[sym];
+    const pnlPct = p.pnl_pct; const pnlUSD = p.pnl_usd;
+    const pnlClass = pnlPct >= 0 ? 'pos' : 'neg';
+    const barClass = pnlPct >= 0 ? 'pos-bar' : 'neg-bar';
+    const barW = Math.min(Math.abs(pnlPct) * 5, 100);
+    return `<tr>
+      <td><strong>${sym}</strong></td>
+      <td class="side-${p.side}">${p.side?.toUpperCase()}</td>
+      <td><div class="level"><div class="level-label">Entry</div><div class="level-val entry">$${fmt(p.entry)}</div></div></td>
+      <td><div class="level"><div class="level-label">Current</div><div class="level-val">$${fmt(p.current_price)}</div></div></td>
+      <td><div class="level"><div class="level-label">SL</div><div class="level-val sl">$${fmt(p.stop)}</div></div></td>
+      <td><div class="level"><div class="level-label">TP (2×R)</div><div class="level-val tp">$${fmt(p.tp)}</div></div></td>
+      <td>${fmt(p.quantity, 6)}</td>
+      <td><div class="pnl-bar-wrap">
+        <span class="${pnlClass}">${pnlPct >= 0 ? '+' : ''}${fmt(pnlPct, 2)}%</span>
+        <br><small class="${pnlClass}">${pnlUSD >= 0 ? '+' : ''}${fmtUSD(pnlUSD)}</small>
+        <div class="pnl-bar ${barClass}" style="width:${barW}px"></div>
+      </div></td>
+    </tr>`;
+  }).join('');
+}
+
+function updateWeights(weights) {
+  SYMBOLS.forEach(sym => {
+    const s = slug(sym);
+    const w = weights[sym]; const pct = w != null ? (w * 100) : null;
+    id('apct-' + s).textContent = pct != null ? fmt(pct, 1) + '%' : '—';
+    const colors = {'BTC/USDT':'var(--orange)', 'ETH/USDT':'var(--blue)', 'SOL/USDT':'var(--purple)'};
+    id('abar-' + s).style.width = pct != null ? pct + '%' : '33%';
+    id('abar-' + s).style.background = colors[sym] || 'var(--blue)';
+  });
+}
+
+function updateTrades(trades) {
+  id('s-trades').textContent = trades.length;
+  const tbody = id('trades-body');
+  if (!trades.length) {
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="10">No trades yet</td></tr>'; return;
+  }
+  tbody.innerHTML = trades.map(t => {
+    const sideClass = (t.side === 'long' || t.side === 'buy') ? 'side-long' : 'side-short';
+    const pnlClass = t.pnl == null ? '' : (t.pnl >= 0 ? 'pos' : 'neg');
+    const pnlStr = t.pnl != null ? ((t.pnl >= 0 ? '+' : '') + fmtUSD(t.pnl)) : '—';
+    const statusCls = t.status === 'FILLED' ? 'badge-green' : 'badge-yellow';
+    return `<tr>
+      <td style="color:var(--muted);font-size:11px">#${t.id}</td>
+      <td style="color:var(--muted);font-size:11px;white-space:nowrap">${t.timestamp || '—'}</td>
+      <td><strong>${t.asset_symbol}</strong></td>
+      <td class="${sideClass}">${t.side?.toUpperCase()}</td>
+      <td style="font-size:11px;color:var(--muted)">${t.strategy_name || '—'}</td>
+      <td>$${fmt(t.price)}</td>
+      <td>${fmt(t.quantity, 6)}</td>
+      <td class="${pnlClass}">${pnlStr}</td>
+      <td><span class="badge ${statusCls}" style="font-size:10px">${t.status || '—'}</span></td>
+      <td><div class="notes" title="${t.notes || ''}">${t.notes || '—'}</div></td>
+    </tr>`;
+  }).join('');
+}
+
+function updateHeader(data) {
+  const running = data.engine_running;
+  const cb = data.circuit_breaker_ok;
+  id('engine-badge').textContent = running ? '● Engine Running' : '● Engine Stopped';
+  id('engine-badge').className = 'badge ' + (running ? 'badge-green' : 'badge-red');
+  id('cb-badge').textContent = cb ? 'Circuit Breaker OK' : '⚠ Circuit Breaker OPEN';
+  id('cb-badge').className = 'badge ' + (cb ? 'badge-green' : 'badge-red');
+  id('s-account').textContent = data.account_size != null ? fmtUSD(data.account_size) : '—';
+  id('s-cycle').textContent = data.last_cycle_utc || 'Not yet run';
+}
+
+async function refresh() {
+  const now = new Date().toLocaleTimeString();
+  id('last-update').textContent = '↻ ' + now;
+  startCountdown(REFRESH_MS);
+  try {
+    const [snap, trades] = await Promise.all([fetchSnapshot(), fetchTrades()]);
+    updateHeader(snap);
+    updatePrices(snap.live_prices || {}, snap.regimes || {});
+    updatePositions(snap.positions || {}, snap.live_prices || {});
+    updateWeights(snap.weights || {});
+    updateTrades(trades);
+    id('last-update').textContent = 'Updated ' + now;
+  } catch(e) {
+    id('last-update').textContent = '✗ Update failed ' + now;
+    console.error(e);
+  }
+}
+
+refresh();
+setInterval(refresh, REFRESH_MS);
+</script>
+</body>
+</html>
